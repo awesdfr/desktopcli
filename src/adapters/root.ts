@@ -34,7 +34,7 @@ export function createRootCommands(): CommandDefinition[] {
     {
       name: "window",
       summary: "List, find, or activate top-level windows.",
-      usage: "list|find|activate [--query <text>] [--handle <hwnd>]",
+      usage: "list|find|activate|rect [--query <text>] [--handle <hwnd>]",
       strategy: "WIN32",
       async run(ctx) {
         const subcommand = ctx.args.positional[0] || "list";
@@ -49,6 +49,9 @@ export function createRootCommands(): CommandDefinition[] {
         }
         if (subcommand === "activate") {
           return desktopBridge("window.activate", { query, handle: handle ? Number(handle) : undefined });
+        }
+        if (subcommand === "rect") {
+          return desktopBridge("window.rect", { query, handle: handle ? Number(handle) : undefined });
         }
 
         return { ok: false, message: `unknown window command: ${subcommand}` };

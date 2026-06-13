@@ -138,14 +138,15 @@ desktopcli wechat run --file workflow.json --dry-run
 desktopcli capcut run --file workflow.json --yes
 ```
 
-Supported workflow actions currently include `launch`, `activate`, `click`,
-`mouse-click`, `type`, `hotkey`, `wait`, `files-to-clipboard`, `paste-files`,
-and `sleep`.
+Supported workflow actions currently include `launch`, `activate`,
+`wait-window`, `wait-window-gone`, `click`, `mouse-click`, `type`, `hotkey`,
+`wait`, `files-to-clipboard`, `paste-files`, and `sleep`.
 
 Window matching supports exact prefixes such as `title:微信`,
-`title:朋友圈`, and `class:Qt51514QWindowIcon`. Adapter workflows should prefer
-these exact selectors over fuzzy text like `微信`, because browser tabs and
-other windows can contain the same words.
+`title:朋友圈`, and `class:Qt51514QWindowIcon`, and compound selectors such as
+`title:微信,class:Qt51514QWindowIcon`. Adapter workflows should prefer these
+exact selectors over fuzzy text like `微信`, because browser tabs and other
+windows can contain the same words.
 
 ## Roadmap
 

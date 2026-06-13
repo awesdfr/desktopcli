@@ -1,16 +1,22 @@
-import { getStringFlag, getStringFlags } from "../core/args.js";
+import { getBooleanFlag, getStringFlag, getStringFlags } from "../core/args.js";
 import type { AdapterDefinition, CommandDefinition, CommandResult } from "../core/types.js";
 import { readWorkflowFile, runWorkflow, type WorkflowStep } from "../core/workflow.js";
 import { desktopBridge } from "../drivers/desktopBridge.js";
 import type { WindowSummary } from "../drivers/desktopBridge.js";
 
-const windowQueries = ["title:微信", "title:朋友圈", "class:Qt51514QWindowIcon"];
-const defaultWindowQuery = "title:微信";
-const momentsWindowQuery = "title:朋友圈";
+const windowQueries = [
+  "title:微信,class:Qt51514QWindowIcon",
+  "title:朋友圈,class:Qt51514QWindowIcon"
+];
+const defaultWindowQuery = "title:微信,class:Qt51514QWindowIcon";
+const momentsWindowQuery = "title:朋友圈,class:Qt51514QWindowIcon";
 
 const wechatUiProfile = {
   mainWindow: defaultWindowQuery,
   momentsWindow: momentsWindowQuery,
+  filePickerWindow: "title:选择文件",
+  searchBox: { x: 122, y: 56 },
+  messageInput: { x: 360, y: 588 },
   sidebarMoments: { x: 38, y: 256 },
   momentsCamera: { x: 74, y: 23 },
   momentsComposerText: { x: 156, y: 116 },
@@ -143,8 +149,11 @@ function createWechatCommands(): CommandDefinition[] {
         }
         return runWorkflow(ctx, [
           ...(to ? searchSteps(ctx, to, true) : [{ action: "activate", window: windowQuery(ctx) } satisfies WorkflowStep]),
+          { action: "sleep", ms: 400 },
+          { action: "mouse-click", window: windowQuery(ctx), ...wechatUiProfile.messageInput },
           { action: "type", window: windowQuery(ctx), text },
-          { action: "hotkey", window: windowQuery(ctx), keys: getStringFlag(ctx.args, "send-keys", "enter") }
+          { action: "hotkey", window: windowQuery(ctx), keys: getStringFlag(ctx.args, "send-keys", "enter") },
+          { action: "sleep", ms: 300 }
         ]);
       }
     },
@@ -168,11 +177,14 @@ function createWechatCommands(): CommandDefinition[] {
       strategy: "INPUT",
       dangerous: true,
       async run(ctx) {
-        const textOnly = getStringFlag(ctx.args, "text-only") || true;
+        const textOnly = getBooleanFlag(ctx.args, "text-only") || !getStringFlags(ctx.args, "file").length;
         return runWorkflow(ctx, [
           ...openMomentsSteps(ctx),
           { action: "mouse-click", window: momentsWindowQuery, ...wechatUiProfile.momentsCamera },
-          ...(textOnly ? [{ action: "hotkey", keys: "esc" } satisfies WorkflowStep] : [])
+          ...(textOnly ? [
+            { action: "hotkey", keys: "esc" } satisfies WorkflowStep,
+            { action: "wait-window-gone", window: wechatUiProfile.filePickerWindow, timeout: 2 } satisfies WorkflowStep
+          ] : [])
         ]);
       }
     },
@@ -376,9 +388,11 @@ function primitiveTypeCommand(): CommandDefinition {
 function searchSteps(ctx: { args: { positional: string[]; flags: Record<string, string | boolean | string[]> } }, query: string, open: boolean): WorkflowStep[] {
   return [
     { action: "activate", window: windowQuery(ctx) },
-    { action: "hotkey", window: windowQuery(ctx), keys: getStringFlag(ctx.args, "search-keys", "ctrl+f") },
+    { action: "mouse-click", window: windowQuery(ctx), ...wechatUiProfile.searchBox },
+    { action: "hotkey", window: windowQuery(ctx), keys: "ctrl+a" },
     { action: "type", window: windowQuery(ctx), text: query },
-    ...(open ? [{ action: "hotkey", window: windowQuery(ctx), keys: "enter" } satisfies WorkflowStep] : [])
+    { action: "sleep", ms: 600 },
+    ...(open ? [{ action: "hotkey", window: windowQuery(ctx), keys: "enter" } satisfies WorkflowStep, { action: "sleep", ms: 500 } satisfies WorkflowStep] : [])
   ];
 }
 
@@ -394,7 +408,7 @@ function openMomentsSteps(ctx: { args: { positional: string[]; flags: Record<str
   return [
     { action: "activate", window: mainWindowQuery(ctx) },
     { action: "mouse-click", window: mainWindowQuery(ctx), ...wechatUiProfile.sidebarMoments },
-    { action: "sleep", ms: 500 },
+    { action: "wait-window", window: momentsWindowQuery, timeout: 5 },
     { action: "activate", window: momentsWindowQuery }
   ];
 }
@@ -418,6 +432,7 @@ function composeMomentsSteps(
     steps.push({ action: "sleep", ms: 500 });
   } else {
     steps.push({ action: "hotkey", keys: "esc" });
+    steps.push({ action: "wait-window-gone", window: wechatUiProfile.filePickerWindow, timeout: 2 });
     steps.push({ action: "sleep", ms: 250 });
   }
 

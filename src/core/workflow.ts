@@ -5,6 +5,8 @@ import { desktopBridge } from "../drivers/desktopBridge.js";
 export type WorkflowStep =
   | { action: "launch"; command: string }
   | { action: "activate"; window: string }
+  | { action: "wait-window"; window: string; timeout?: number; requireUnique?: boolean }
+  | { action: "wait-window-gone"; window: string; timeout?: number }
   | { action: "click"; window?: string; text?: string; texts?: string[] }
   | { action: "mouse-click"; window?: string; x: number; y: number; relative?: boolean }
   | { action: "type"; window?: string; text: string; mode?: string }
@@ -57,6 +59,24 @@ async function runStep(step: WorkflowStep): Promise<CommandResult> {
 
   if (step.action === "activate") {
     return desktopBridge("window.activate", { query: step.window });
+  }
+
+  if (step.action === "wait-window") {
+    return desktopBridge("window.wait", {
+      query: step.window,
+      timeout: step.timeout,
+      present: true,
+      requireUnique: step.requireUnique ?? true
+    });
+  }
+
+  if (step.action === "wait-window-gone") {
+    return desktopBridge("window.wait", {
+      query: step.window,
+      timeout: step.timeout,
+      present: false,
+      requireUnique: false
+    });
   }
 
   if (step.action === "click") {

@@ -106,6 +106,8 @@ def main() -> int:
         "window.list": window_list,
         "window.find": window_find,
         "window.activate": window_activate,
+        "window.wait": window_wait,
+        "window.rect": window_rect,
         "inspect": inspect,
         "click": click,
         "mouse.click": mouse_click,
@@ -144,6 +146,8 @@ def dependencies(_: dict[str, Any]) -> dict[str, Any]:
             "baseline": [
                 "window.list",
                 "window.activate",
+                "window.wait",
+                "window.rect",
                 "type",
                 "hotkey",
                 "app.launch",
@@ -169,11 +173,16 @@ def window_find(payload: dict[str, Any]) -> dict[str, Any]:
     if not query:
         raise ValueError("window.find requires query")
 
-    for window in enum_windows():
-        if matches_window(window, query):
-            return {"data": window}
+    matches = [window for window in enum_windows() if matches_window(window, query)]
+    require_unique = bool(payload.get("requireUnique", True))
 
-    raise ValueError(f"no window matched: {query}")
+    if not matches:
+        raise ValueError(f"no window matched: {query}")
+    if require_unique and len(matches) != 1:
+        titles = ", ".join(f"{window['title']} ({window['className']})" for window in matches[:5])
+        raise ValueError(f"window query is ambiguous: {query}; matched {len(matches)} windows: {titles}")
+
+    return {"data": matches[0]}
 
 
 def window_activate(payload: dict[str, Any]) -> dict[str, Any]:
@@ -183,13 +192,51 @@ def window_activate(payload: dict[str, Any]) -> dict[str, Any]:
     if handle is None:
         if not query:
             raise ValueError("window.activate requires handle or query")
-        handle = window_find({"query": query})["data"]["handle"]
+        handle = window_find({"query": query, "requireUnique": payload.get("requireUnique", True)})["data"]["handle"]
 
     hwnd = wintypes.HWND(int(handle))
     user32.ShowWindow(hwnd, SW_RESTORE)
     user32.SetForegroundWindow(hwnd)
     time.sleep(float(payload.get("delay") or 0.2))
     return {"data": {"handle": int(handle), "activated": True}}
+
+
+def window_wait(payload: dict[str, Any]) -> dict[str, Any]:
+    query = str(payload.get("query") or "")
+    if not query:
+        raise ValueError("window.wait requires query")
+
+    timeout = float(payload.get("timeout") or 10)
+    interval = float(payload.get("interval") or 0.25)
+    present = bool(payload.get("present", True))
+    require_unique = bool(payload.get("requireUnique", True))
+    deadline = time.time() + timeout
+    last_matches: list[dict[str, Any]] = []
+
+    while time.time() < deadline:
+        last_matches = [window for window in enum_windows() if matches_window(window, query)]
+        if present:
+            if last_matches and (not require_unique or len(last_matches) == 1):
+                return {"data": {"query": query, "matches": last_matches}}
+        elif not last_matches:
+            return {"data": {"query": query, "matches": []}}
+        time.sleep(interval)
+
+    if present and require_unique and len(last_matches) > 1:
+        raise ValueError(f"timed out waiting for unique window: {query}; matched {len(last_matches)}")
+    if present:
+        raise ValueError(f"timed out waiting for window: {query}")
+    raise ValueError(f"timed out waiting for window to close: {query}")
+
+
+def window_rect(payload: dict[str, Any]) -> dict[str, Any]:
+    handle = payload.get("handle")
+    query = payload.get("query")
+    if handle is None:
+        if not query:
+            raise ValueError("window.rect requires handle or query")
+        handle = window_find({"query": query, "requireUnique": payload.get("requireUnique", True)})["data"]["handle"]
+    return {"data": {"handle": int(handle), "rect": get_window_rect(int(handle))}}
 
 
 def inspect(payload: dict[str, Any]) -> dict[str, Any]:
@@ -247,9 +294,11 @@ def mouse_click(payload: dict[str, Any]) -> dict[str, Any]:
     click_y = int(y)
 
     if target:
-        window = window_activate({"query": target})["data"]
+        window = window_activate({"query": target, "requireUnique": payload.get("requireUnique", True)})["data"]
         if relative:
             rect = get_window_rect(int(window["handle"]))
+            if is_minimized_rect(rect):
+                raise ValueError(f"window is minimized or off-screen after activation: {target}; rect={rect}")
             click_x += rect["left"]
             click_y += rect["top"]
 
@@ -266,7 +315,7 @@ def type_text(payload: dict[str, Any]) -> dict[str, Any]:
     target = payload.get("window")
 
     if target:
-        window_activate({"query": target})
+        window_activate({"query": target, "requireUnique": payload.get("requireUnique", True)})
 
     if mode == "keys" and send_keys is not None:
         send_keys(text, with_spaces=True, pause=0.01)
@@ -288,7 +337,7 @@ def hotkey(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("hotkey requires keys")
 
     if target:
-        window_activate({"query": target})
+        window_activate({"query": target, "requireUnique": payload.get("requireUnique", True)})
 
     if send_keys is not None:
         send_keys(to_pywinauto_chord(parts))
@@ -435,6 +484,10 @@ def get_window_rect(handle: int) -> dict[str, int]:
     }
 
 
+def is_minimized_rect(rect: dict[str, int]) -> bool:
+    return rect["left"] <= -30000 or rect["top"] <= -30000 or rect["width"] <= 64 or rect["height"] <= 64
+
+
 def find_uia_window(query: str):
     if Desktop is None:
         raise ValueError("pywinauto is not installed")
@@ -459,6 +512,8 @@ def matches_window(window: dict[str, Any], query: str) -> bool:
 
 
 def matches_title_class(title: str, class_name: str, query: str) -> bool:
+    if "," in query:
+        return all(matches_title_class(title, class_name, part.strip()) for part in query.split(",") if part.strip())
     if query.startswith("title:"):
         return title == query.removeprefix("title:").lower()
     if query.startswith("title~"):

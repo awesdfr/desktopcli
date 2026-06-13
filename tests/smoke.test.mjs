@@ -27,6 +27,7 @@ const dryRunResult = JSON.parse(dryRun);
 assert.equal(dryRunResult.ok, true);
 assert.equal(dryRunResult.data.dryRun, true);
 assert.equal(dryRunResult.warnings[0].includes("dry-run"), true);
+assert.equal(dryRunResult.data.steps.some((step) => step.action === "mouse-click" && step.x === 360 && step.y === 588), true);
 
 const sendFile = execFileSync(process.execPath, [cli, "wechat", "send-file", "--to", "文件传输助手", "--file", "README.md", "--json"], {
   cwd: root,
@@ -51,6 +52,6 @@ const momentsPost = execFileSync(process.execPath, [cli, "wechat", "moments-post
 const momentsPostResult = JSON.parse(momentsPost);
 assert.equal(momentsPostResult.ok, true);
 assert.equal(momentsPostResult.data.steps.some((step) => step.action === "mouse-click"), true);
-assert.equal(momentsPostResult.data.steps.some((step) => step.window === "title:朋友圈"), true);
+assert.equal(momentsPostResult.data.steps.some((step) => step.action === "wait-window" && step.window === "title:朋友圈,class:Qt51514QWindowIcon"), true);
 
 console.log("smoke tests passed");
