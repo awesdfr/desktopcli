@@ -1,0 +1,28 @@
+{
+  "name": "desktopcli",
+  "version": "0.1.0",
+  "description": "Adapter-first CLI for Windows desktop applications.",
+  "type": "module",
+  "bin": {
+    "desktopcli": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node tests/smoke.test.mjs",
+    "check": "npm run build && npm test",
+    "prepare": "npm run build"
+  },
+  "keywords": [
+    "desktop",
+    "automation",
+    "cli",
+    "uia",
+    "rpa"
+  ],
+  "author": "",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.0"
+  }
+}

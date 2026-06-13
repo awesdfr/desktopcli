@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.desktopcli/
+*.log
+*.pyc
+__pycache__/
+.pytest_cache/
+trace/
