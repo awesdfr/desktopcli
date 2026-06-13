@@ -22,6 +22,7 @@ export function createRootCommands(): CommandDefinition[] {
         return {
           ok: true,
           data: [
+            { name: "capcut", status: "adapter", description: "CapCut desktop workflows." },
             { name: "wechat", status: "adapter", description: "WeChat desktop workflows." },
             { name: "qq", status: "adapter", description: "QQ desktop workflows." },
             { name: "jianying", status: "adapter", description: "Jianying/CapCut desktop workflows." },

@@ -76,6 +76,17 @@ export function getStringFlag(args: ParsedArgs, key: string, fallback = ""): str
   return fallback;
 }
 
+export function getStringFlags(args: ParsedArgs, key: string): string[] {
+  const value = args.flags[key];
+  if (Array.isArray(value)) {
+    return value.map(String).filter(Boolean);
+  }
+  if (typeof value === "string") {
+    return [value].filter(Boolean);
+  }
+  return [];
+}
+
 export function getBooleanFlag(args: ParsedArgs, key: string): boolean {
   return args.flags[key] === true || args.flags[key] === "true";
 }

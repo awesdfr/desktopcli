@@ -107,6 +107,9 @@ def main() -> int:
         "hotkey": hotkey,
         "wait.text": wait_text,
         "app.launch": app_launch,
+        "clipboard.text.get": clipboard_text_get,
+        "clipboard.text.set": clipboard_text_set,
+        "clipboard.files": clipboard_files,
     }
 
     handler = actions.get(action)
@@ -132,7 +135,16 @@ def dependencies(_: dict[str, Any]) -> dict[str, Any]:
             "python": sys.version.split()[0],
             "pywinauto": Desktop is not None,
             "uia": Desktop is not None,
-            "baseline": ["window.list", "window.activate", "type", "hotkey", "app.launch"],
+            "baseline": [
+                "window.list",
+                "window.activate",
+                "type",
+                "hotkey",
+                "app.launch",
+                "clipboard.text.get",
+                "clipboard.text.set",
+                "clipboard.files",
+            ],
         }
     }
 
@@ -298,6 +310,58 @@ def app_launch(payload: dict[str, Any]) -> dict[str, Any]:
     else:
         process = subprocess.Popen(str(command), shell=True, **popen_options)
     return {"data": {"pid": process.pid}}
+
+
+def clipboard_text_get(_: dict[str, Any]) -> dict[str, Any]:
+    completed = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", "Get-Clipboard -Raw"],
+        text=True,
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise ValueError(completed.stderr.strip() or "failed to get clipboard text")
+    return {"data": {"text": completed.stdout}}
+
+
+def clipboard_text_set(payload: dict[str, Any]) -> dict[str, Any]:
+    text = str(payload.get("text") or "")
+    set_clipboard_text(text)
+    return {"data": {"chars": len(text)}}
+
+
+def clipboard_files(payload: dict[str, Any]) -> dict[str, Any]:
+    files = payload.get("files")
+    if isinstance(files, str):
+        file_paths = [files]
+    elif isinstance(files, list):
+        file_paths = [str(file) for file in files]
+    else:
+        raise ValueError("clipboard.files requires files")
+
+    if not file_paths:
+        raise ValueError("clipboard.files requires at least one file")
+
+    script = """
+Add-Type -AssemblyName System.Windows.Forms
+$list = New-Object System.Collections.Specialized.StringCollection
+foreach ($path in $args) {
+  $resolved = (Resolve-Path -LiteralPath $path).Path
+  [void]$list.Add($resolved)
+}
+[System.Windows.Forms.Clipboard]::SetFileDropList($list)
+"""
+    completed = subprocess.run(
+        ["powershell", "-STA", "-NoProfile", "-Command", script, *file_paths],
+        text=True,
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise ValueError(completed.stderr.strip() or "failed to set clipboard files")
+    return {"data": {"files": file_paths}}
 
 
 def enum_windows() -> list[dict[str, Any]]:

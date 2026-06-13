@@ -10,6 +10,9 @@ desktopcli <app> <command> [options]
 desktopcli window list
 desktopcli inspect --query "微信" --json
 desktopcli wechat send --to "文件传输助手" --text "hello" --dry-run
+desktopcli wechat send-file --to "文件传输助手" --file "C:\demo.txt" --dry-run
+desktopcli capcut import --file "C:\Videos\raw.mp4" --dry-run
+desktopcli capcut split --dry-run
 desktopcli jianying export --out "C:\Videos\demo.mp4" --dry-run
 ```
 
@@ -23,7 +26,9 @@ This is a working MVP, not a universal desktop agent. The stable core is:
 - Python Windows bridge
 - no-dependency baseline for top-level window listing and activation
 - optional `pywinauto` support for UIA tree dumps and control clicks
-- first adapters: `wechat`, `qq`, `jianying`, `notepad`
+- first adapters: `capcut`, `wechat`, `qq`, `jianying`, `notepad`
+- workflow runner for adapter-specific JSON action sequences
+- file-drop clipboard support for WeChat files/images and CapCut media import
 
 Dangerous commands are dry-run by default. Pass `--yes` only when you are ready
 to let the CLI type, click, launch, or send keys in the current desktop session.
@@ -60,10 +65,29 @@ App adapters:
 ```powershell
 desktopcli wechat status
 desktopcli wechat dump --json
+desktopcli wechat search --query "文件传输助手" --dry-run
+desktopcli wechat open-chat --to "文件传输助手" --dry-run
 desktopcli wechat send --to "文件传输助手" --text "hello" --dry-run
+desktopcli wechat paste-file --to "文件传输助手" --file "C:\demo.txt" --dry-run
+desktopcli wechat send-file --to "文件传输助手" --file "C:\demo.txt" --dry-run
+desktopcli wechat send-image --to "文件传输助手" --file "C:\demo.png" --dry-run
+desktopcli wechat copy-selected --dry-run
 
 desktopcli qq status
 desktopcli qq send --to "我的电脑" --text "hello" --dry-run
+
+desktopcli capcut status
+desktopcli capcut launch --dry-run
+desktopcli capcut new-project --dry-run
+desktopcli capcut import --file "C:\素材\a.mp4" --file "C:\素材\b.wav" --dry-run
+desktopcli capcut paste-media --file "C:\素材\a.mp4" --dry-run
+desktopcli capcut split --dry-run
+desktopcli capcut add-text --text "片头字幕" --dry-run
+desktopcli capcut captions --dry-run
+desktopcli capcut audio --dry-run
+desktopcli capcut filters --dry-run
+desktopcli capcut transitions --dry-run
+desktopcli capcut export --out "C:\输出\demo.mp4" --dry-run
 
 desktopcli jianying status
 desktopcli jianying import --dir "C:\素材" --dry-run
@@ -83,6 +107,7 @@ CLI entry
         -> Win32 window APIs
         -> pywinauto UIA tree and control actions
         -> clipboard, keyboard, hotkeys
+        -> file-drop clipboard
         -> future OCR/image backends
 ```
 
@@ -90,11 +115,34 @@ Adapters expose deterministic commands, rather than asking a general agent to
 freestyle a desktop session. This keeps workflows inspectable, testable, and
 recoverable.
 
+## Workflow Files
+
+Every serious adapter also has a `run` command. A workflow file is a JSON array:
+
+```json
+[
+  { "action": "activate", "window": "微信" },
+  { "action": "hotkey", "window": "微信", "keys": "ctrl+f" },
+  { "action": "type", "window": "微信", "text": "文件传输助手" },
+  { "action": "hotkey", "window": "微信", "keys": "enter" }
+]
+```
+
+Run it with:
+
+```powershell
+desktopcli wechat run --file workflow.json --dry-run
+desktopcli capcut run --file workflow.json --yes
+```
+
+Supported workflow actions currently include `launch`, `activate`, `click`,
+`type`, `hotkey`, `wait`, `files-to-clipboard`, `paste-files`, and `sleep`.
+
 ## Roadmap
 
 - plugin directory similar to `~/.opencli/clis`
 - adapter manifest schema and command DSL
 - OCR backend for applications that hide their UIA tree
 - screenshot and UIA trace bundles on failure
-- stronger WeChat/QQ contact search flows
+- stronger WeChat/QQ contact search flows and selectable message readers
 - Jianying draft-file integration for less brittle edit/export automation
