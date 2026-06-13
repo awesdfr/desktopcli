@@ -48,9 +48,14 @@ user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintyp
 user32.SetForegroundWindow.argtypes = [wintypes.HWND]
 user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
 user32.keybd_event.argtypes = [wintypes.BYTE, wintypes.BYTE, wintypes.DWORD, wintypes.ULONG]
+user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+user32.SetCursorPos.argtypes = [ctypes.c_int, ctypes.c_int]
+user32.mouse_event.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.DWORD, wintypes.DWORD, wintypes.ULONG]
 
 SW_RESTORE = 9
 KEYEVENTF_KEYUP = 0x0002
+MOUSEEVENTF_LEFTDOWN = 0x0002
+MOUSEEVENTF_LEFTUP = 0x0004
 
 VK_CONTROL = 0x11
 VK_MENU = 0x12
@@ -103,6 +108,7 @@ def main() -> int:
         "window.activate": window_activate,
         "inspect": inspect,
         "click": click,
+        "mouse.click": mouse_click,
         "type": type_text,
         "hotkey": hotkey,
         "wait.text": wait_text,
@@ -141,6 +147,7 @@ def dependencies(_: dict[str, Any]) -> dict[str, Any]:
                 "type",
                 "hotkey",
                 "app.launch",
+                "mouse.click",
                 "clipboard.text.get",
                 "clipboard.text.set",
                 "clipboard.files",
@@ -150,24 +157,20 @@ def dependencies(_: dict[str, Any]) -> dict[str, Any]:
 
 
 def window_list(payload: dict[str, Any]) -> dict[str, Any]:
-    query = str(payload.get("query") or "").lower()
+    query = str(payload.get("query") or "")
     windows = enum_windows()
     if query:
-        windows = [
-            window
-            for window in windows
-            if query in window["title"].lower() or query in window["className"].lower()
-        ]
+        windows = [window for window in windows if matches_window(window, query)]
     return {"data": windows}
 
 
 def window_find(payload: dict[str, Any]) -> dict[str, Any]:
-    query = str(payload.get("query") or "").lower()
+    query = str(payload.get("query") or "")
     if not query:
         raise ValueError("window.find requires query")
 
     for window in enum_windows():
-        if query in window["title"].lower() or query in window["className"].lower():
+        if matches_window(window, query):
             return {"data": window}
 
     raise ValueError(f"no window matched: {query}")
@@ -230,6 +233,31 @@ def click(payload: dict[str, Any]) -> dict[str, Any]:
             return {"data": {"clicked": info.name or info.automation_id, "controlType": info.control_type}}
 
     raise ValueError(f"no control matched: {text}")
+
+
+def mouse_click(payload: dict[str, Any]) -> dict[str, Any]:
+    x = payload.get("x")
+    y = payload.get("y")
+    if x is None or y is None:
+        raise ValueError("mouse.click requires x and y")
+
+    target = payload.get("window")
+    relative = bool(payload.get("relative", True))
+    click_x = int(x)
+    click_y = int(y)
+
+    if target:
+        window = window_activate({"query": target})["data"]
+        if relative:
+            rect = get_window_rect(int(window["handle"]))
+            click_x += rect["left"]
+            click_y += rect["top"]
+
+    user32.SetCursorPos(click_x, click_y)
+    time.sleep(float(payload.get("delay") or 0.05))
+    user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+    user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+    return {"data": {"x": click_x, "y": click_y, "relative": relative, "window": target}}
 
 
 def type_text(payload: dict[str, Any]) -> dict[str, Any]:
@@ -393,17 +421,30 @@ def enum_windows() -> list[dict[str, Any]]:
     return windows
 
 
+def get_window_rect(handle: int) -> dict[str, int]:
+    rect = wintypes.RECT()
+    if not user32.GetWindowRect(wintypes.HWND(handle), ctypes.byref(rect)):
+        raise ValueError(f"failed to get window rect for handle: {handle}")
+    return {
+        "left": int(rect.left),
+        "top": int(rect.top),
+        "right": int(rect.right),
+        "bottom": int(rect.bottom),
+        "width": int(rect.right - rect.left),
+        "height": int(rect.bottom - rect.top),
+    }
+
+
 def find_uia_window(query: str):
     if Desktop is None:
         raise ValueError("pywinauto is not installed")
 
     desktop = Desktop(backend="uia")
     if query:
-        query_lower = query.lower()
         for window in desktop.windows():
             title = (window.window_text() or "").lower()
             class_name = (window.element_info.class_name or "").lower()
-            if query_lower in title or query_lower in class_name:
+            if matches_title_class(title, class_name, query):
                 return window
         raise ValueError(f"no UIA window matched: {query}")
 
@@ -411,6 +452,23 @@ def find_uia_window(query: str):
     if active is None:
         raise ValueError("no active UIA window found")
     return active
+
+
+def matches_window(window: dict[str, Any], query: str) -> bool:
+    return matches_title_class(window["title"].lower(), window["className"].lower(), query)
+
+
+def matches_title_class(title: str, class_name: str, query: str) -> bool:
+    if query.startswith("title:"):
+        return title == query.removeprefix("title:").lower()
+    if query.startswith("title~"):
+        return query.removeprefix("title~").lower() in title
+    if query.startswith("class:"):
+        return class_name == query.removeprefix("class:").lower()
+    if query.startswith("class~"):
+        return query.removeprefix("class~").lower() in class_name
+    query_lower = query.lower()
+    return query_lower in title or query_lower in class_name
 
 
 def serialize_element(element: Any, depth: int, limit: int, count: list[int] | None = None) -> dict[str, Any]:

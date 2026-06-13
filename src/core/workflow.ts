@@ -6,6 +6,7 @@ export type WorkflowStep =
   | { action: "launch"; command: string }
   | { action: "activate"; window: string }
   | { action: "click"; window?: string; text?: string; texts?: string[] }
+  | { action: "mouse-click"; window?: string; x: number; y: number; relative?: boolean }
   | { action: "type"; window?: string; text: string; mode?: string }
   | { action: "hotkey"; window?: string; keys: string }
   | { action: "wait"; window?: string; text: string; timeout?: number }
@@ -72,6 +73,15 @@ async function runStep(step: WorkflowStep): Promise<CommandResult> {
       }
     }
     return { ok: false, message: `no click target matched: ${labels.join(", ")}`, data: { attempts } };
+  }
+
+  if (step.action === "mouse-click") {
+    return desktopBridge("mouse.click", {
+      window: step.window,
+      x: step.x,
+      y: step.y,
+      relative: step.relative ?? Boolean(step.window)
+    });
   }
 
   if (step.action === "type") {

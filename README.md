@@ -71,6 +71,9 @@ desktopcli wechat send --to "文件传输助手" --text "hello" --dry-run
 desktopcli wechat paste-file --to "文件传输助手" --file "C:\demo.txt" --dry-run
 desktopcli wechat send-file --to "文件传输助手" --file "C:\demo.txt" --dry-run
 desktopcli wechat send-image --to "文件传输助手" --file "C:\demo.png" --dry-run
+desktopcli wechat moments-open --dry-run
+desktopcli wechat moments-compose --text "晚安" --dry-run
+desktopcli wechat moments-post --text "晚安" --dry-run
 desktopcli wechat copy-selected --dry-run
 
 desktopcli qq status
@@ -136,7 +139,13 @@ desktopcli capcut run --file workflow.json --yes
 ```
 
 Supported workflow actions currently include `launch`, `activate`, `click`,
-`type`, `hotkey`, `wait`, `files-to-clipboard`, `paste-files`, and `sleep`.
+`mouse-click`, `type`, `hotkey`, `wait`, `files-to-clipboard`, `paste-files`,
+and `sleep`.
+
+Window matching supports exact prefixes such as `title:微信`,
+`title:朋友圈`, and `class:Qt51514QWindowIcon`. Adapter workflows should prefer
+these exact selectors over fuzzy text like `微信`, because browser tabs and
+other windows can contain the same words.
 
 ## Roadmap
 

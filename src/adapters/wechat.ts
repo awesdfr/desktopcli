@@ -4,8 +4,18 @@ import { readWorkflowFile, runWorkflow, type WorkflowStep } from "../core/workfl
 import { desktopBridge } from "../drivers/desktopBridge.js";
 import type { WindowSummary } from "../drivers/desktopBridge.js";
 
-const windowQueries = ["微信", "WeChat", "Weixin"];
-const defaultWindowQuery = "微信";
+const windowQueries = ["title:微信", "title:朋友圈", "class:Qt51514QWindowIcon"];
+const defaultWindowQuery = "title:微信";
+const momentsWindowQuery = "title:朋友圈";
+
+const wechatUiProfile = {
+  mainWindow: defaultWindowQuery,
+  momentsWindow: momentsWindowQuery,
+  sidebarMoments: { x: 38, y: 256 },
+  momentsCamera: { x: 74, y: 23 },
+  momentsComposerText: { x: 156, y: 116 },
+  momentsPublish: { x: 424, y: 425 }
+};
 
 export function createWechatAdapter(): AdapterDefinition {
   return {
@@ -37,6 +47,14 @@ function createWechatCommands(): CommandDefinition[] {
         return runWorkflow(ctx, [
           { action: "launch", command: getStringFlag(ctx.args, "command", "WeChat.exe") }
         ]);
+      }
+    },
+    {
+      name: "profile",
+      summary: "Print the current built-in WeChat UI coordinate profile.",
+      strategy: "LOCAL",
+      async run() {
+        return { ok: true, data: wechatUiProfile };
       }
     },
     {
@@ -127,6 +145,77 @@ function createWechatCommands(): CommandDefinition[] {
           ...(to ? searchSteps(ctx, to, true) : [{ action: "activate", window: windowQuery(ctx) } satisfies WorkflowStep]),
           { action: "type", window: windowQuery(ctx), text },
           { action: "hotkey", window: windowQuery(ctx), keys: getStringFlag(ctx.args, "send-keys", "enter") }
+        ]);
+      }
+    },
+    {
+      name: "moments-open",
+      summary: "Open the Moments window from the left sidebar.",
+      usage: "[--yes]",
+      strategy: "INPUT",
+      dangerous: true,
+      async run(ctx) {
+        return runWorkflow(ctx, [
+          { action: "activate", window: mainWindowQuery(ctx) },
+          { action: "mouse-click", window: mainWindowQuery(ctx), ...wechatUiProfile.sidebarMoments }
+        ]);
+      }
+    },
+    {
+      name: "moments-camera",
+      summary: "Click the Moments camera button and optionally close the file picker for text-only posts.",
+      usage: "[--text-only] [--yes]",
+      strategy: "INPUT",
+      dangerous: true,
+      async run(ctx) {
+        const textOnly = getStringFlag(ctx.args, "text-only") || true;
+        return runWorkflow(ctx, [
+          ...openMomentsSteps(ctx),
+          { action: "mouse-click", window: momentsWindowQuery, ...wechatUiProfile.momentsCamera },
+          ...(textOnly ? [{ action: "hotkey", keys: "esc" } satisfies WorkflowStep] : [])
+        ]);
+      }
+    },
+    {
+      name: "moments-compose",
+      summary: "Create a Moments draft with text and optional files, without pressing publish.",
+      usage: "--text <content> [--file <image-or-video>] [--yes]",
+      strategy: "INPUT",
+      dangerous: true,
+      async run(ctx) {
+        const text = getStringFlag(ctx.args, "text", ctx.args.positional.join(" "));
+        const files = filePaths(ctx);
+        if (!text && files.length === 0) {
+          return { ok: false, message: "wechat moments-compose requires --text or --file" };
+        }
+        return runWorkflow(ctx, composeMomentsSteps(ctx, text, files, false));
+      }
+    },
+    {
+      name: "moments-post",
+      summary: "Create and publish a Moments post with text and optional files.",
+      usage: "--text <content> [--file <image-or-video>] [--yes]",
+      strategy: "INPUT",
+      dangerous: true,
+      async run(ctx) {
+        const text = getStringFlag(ctx.args, "text", ctx.args.positional.join(" "));
+        const files = filePaths(ctx);
+        if (!text && files.length === 0) {
+          return { ok: false, message: "wechat moments-post requires --text or --file" };
+        }
+        return runWorkflow(ctx, composeMomentsSteps(ctx, text, files, true));
+      }
+    },
+    {
+      name: "moments-publish-current",
+      summary: "Click the publish button in the current Moments composer.",
+      usage: "[--yes]",
+      strategy: "INPUT",
+      dangerous: true,
+      async run(ctx) {
+        return runWorkflow(ctx, [
+          { action: "activate", window: momentsWindowQuery },
+          { action: "mouse-click", window: momentsWindowQuery, ...wechatUiProfile.momentsPublish }
         ]);
       }
     },
@@ -301,6 +390,49 @@ function maybeOpenChatSteps(ctx: { args: { positional: string[]; flags: Record<s
   return searchSteps(ctx, to, true);
 }
 
+function openMomentsSteps(ctx: { args: { positional: string[]; flags: Record<string, string | boolean | string[]> } }): WorkflowStep[] {
+  return [
+    { action: "activate", window: mainWindowQuery(ctx) },
+    { action: "mouse-click", window: mainWindowQuery(ctx), ...wechatUiProfile.sidebarMoments },
+    { action: "sleep", ms: 500 },
+    { action: "activate", window: momentsWindowQuery }
+  ];
+}
+
+function composeMomentsSteps(
+  ctx: { args: { positional: string[]; flags: Record<string, string | boolean | string[]> } },
+  text: string,
+  files: string[],
+  publish: boolean
+): WorkflowStep[] {
+  const steps: WorkflowStep[] = [
+    ...openMomentsSteps(ctx),
+    { action: "mouse-click", window: momentsWindowQuery, ...wechatUiProfile.momentsCamera },
+    { action: "sleep", ms: 500 }
+  ];
+
+  if (files.length > 0) {
+    steps.push({ action: "files-to-clipboard", files });
+    steps.push({ action: "hotkey", keys: "ctrl+v" });
+    steps.push({ action: "hotkey", keys: "enter" });
+    steps.push({ action: "sleep", ms: 500 });
+  } else {
+    steps.push({ action: "hotkey", keys: "esc" });
+    steps.push({ action: "sleep", ms: 250 });
+  }
+
+  if (text) {
+    steps.push({ action: "mouse-click", window: momentsWindowQuery, ...wechatUiProfile.momentsComposerText });
+    steps.push({ action: "type", text });
+  }
+
+  if (publish) {
+    steps.push({ action: "mouse-click", window: momentsWindowQuery, ...wechatUiProfile.momentsPublish });
+  }
+
+  return steps;
+}
+
 function filePaths(ctx: { args: { positional: string[]; flags: Record<string, string | boolean | string[]> } }): string[] {
   const files = getStringFlags(ctx.args, "file");
   const fileList = getStringFlag(ctx.args, "files");
@@ -320,6 +452,10 @@ function splitPathList(value: string): string[] {
 
 function windowQuery(ctx: { args: { positional: string[]; flags: Record<string, string | boolean | string[]> } }): string {
   return getStringFlag(ctx.args, "window", defaultWindowQuery);
+}
+
+function mainWindowQuery(ctx: { args: { positional: string[]; flags: Record<string, string | boolean | string[]> } }): string {
+  return getStringFlag(ctx.args, "main-window", getStringFlag(ctx.args, "window", wechatUiProfile.mainWindow));
 }
 
 async function listWindows(queries: string[]): Promise<WindowSummary[]> {

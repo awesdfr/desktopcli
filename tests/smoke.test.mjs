@@ -44,4 +44,13 @@ const capcutImportResult = JSON.parse(capcutImport);
 assert.equal(capcutImportResult.ok, true);
 assert.equal(capcutImportResult.data.steps.some((step) => step.action === "files-to-clipboard"), true);
 
+const momentsPost = execFileSync(process.execPath, [cli, "wechat", "moments-post", "--text", "晚安", "--json"], {
+  cwd: root,
+  encoding: "utf8"
+});
+const momentsPostResult = JSON.parse(momentsPost);
+assert.equal(momentsPostResult.ok, true);
+assert.equal(momentsPostResult.data.steps.some((step) => step.action === "mouse-click"), true);
+assert.equal(momentsPostResult.data.steps.some((step) => step.window === "title:朋友圈"), true);
+
 console.log("smoke tests passed");
