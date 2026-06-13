@@ -47,8 +47,10 @@ user32.IsWindowVisible.argtypes = [wintypes.HWND]
 user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
 user32.SetForegroundWindow.argtypes = [wintypes.HWND]
 user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+user32.keybd_event.argtypes = [wintypes.BYTE, wintypes.BYTE, wintypes.DWORD, wintypes.ULONG]
 
 SW_RESTORE = 9
+KEYEVENTF_KEYUP = 0x0002
 
 VK_CONTROL = 0x11
 VK_MENU = 0x12
@@ -249,8 +251,7 @@ def hotkey(payload: dict[str, Any]) -> dict[str, Any]:
         window_activate({"query": target})
 
     if send_keys is not None:
-        chord = "+".join(to_pywinauto_key(part) for part in parts)
-        send_keys(chord)
+        send_keys(to_pywinauto_chord(parts))
     else:
         send_hotkey(parts)
 
@@ -286,10 +287,16 @@ def app_launch(payload: dict[str, Any]) -> dict[str, Any]:
     command = payload.get("command")
     if not command:
         raise ValueError("app.launch requires command")
+    popen_options = {
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+        "close_fds": True,
+    }
     if isinstance(command, list):
-        process = subprocess.Popen([str(part) for part in command], close_fds=True)
+        process = subprocess.Popen([str(part) for part in command], **popen_options)
     else:
-        process = subprocess.Popen(str(command), shell=True, close_fds=True)
+        process = subprocess.Popen(str(command), shell=True, **popen_options)
     return {"data": {"pid": process.pid}}
 
 
@@ -382,45 +389,50 @@ def set_clipboard_text(text: str) -> None:
 
 
 def send_hotkey(keys: list[str]) -> None:
-    # Use a tiny PowerShell/.NET SendKeys fallback when pywinauto is unavailable.
-    expression = "".join(to_sendkeys_key(key) for key in keys)
-    subprocess.run(
-        [
-            "powershell",
-            "-NoProfile",
-            "-Command",
-            "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait($args[0])",
-            expression,
-        ],
-        check=True,
-    )
+    vks = [to_virtual_key(key) for key in keys]
+    if any(vk is None for vk in vks):
+        unknown = [key for key, vk in zip(keys, vks) if vk is None]
+        raise ValueError(f"unsupported hotkey key(s): {', '.join(unknown)}")
+
+    modifiers = []
+    normal_keys = []
+    for key, vk in zip(keys, vks):
+        if key.lower() in ("ctrl", "control", "alt", "shift", "win", "cmd"):
+            modifiers.append(vk)
+        else:
+            normal_keys.append(vk)
+
+    for vk in modifiers:
+        key_down(vk)
+    for vk in normal_keys:
+        key_down(vk)
+    for vk in reversed(normal_keys):
+        key_up(vk)
+    for vk in reversed(modifiers):
+        key_up(vk)
 
 
-def to_sendkeys_key(key: str) -> str:
+def to_virtual_key(key: str) -> int | None:
     normalized = key.lower()
-    if normalized in ("ctrl", "control"):
-        return "^"
-    if normalized == "alt":
-        return "%"
-    if normalized == "shift":
-        return "+"
-    special = {
-        "enter": "{ENTER}",
-        "return": "{ENTER}",
-        "tab": "{TAB}",
-        "esc": "{ESC}",
-        "escape": "{ESC}",
-        "space": " ",
-        "backspace": "{BACKSPACE}",
-        "delete": "{DELETE}",
-        "left": "{LEFT}",
-        "up": "{UP}",
-        "right": "{RIGHT}",
-        "down": "{DOWN}",
-    }
-    if normalized in special:
-        return special[normalized]
-    return key
+    if normalized in VK_CODES:
+        return VK_CODES[normalized]
+    if len(key) == 1:
+        char = key.upper()
+        if "A" <= char <= "Z" or "0" <= char <= "9":
+            return ord(char)
+    if normalized.startswith("f") and normalized[1:].isdigit():
+        number = int(normalized[1:])
+        if 1 <= number <= 24:
+            return 0x6F + number
+    return None
+
+
+def key_down(vk: int) -> None:
+    user32.keybd_event(vk, 0, 0, 0)
+
+
+def key_up(vk: int) -> None:
+    user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
 
 
 def to_pywinauto_key(key: str) -> str:
@@ -444,6 +456,26 @@ def to_pywinauto_key(key: str) -> str:
         "down": "{DOWN}",
     }
     return special.get(normalized, key)
+
+
+def to_pywinauto_chord(keys: list[str]) -> str:
+    prefixes = []
+    normal_keys = []
+    for key in keys:
+        normalized = key.lower()
+        if normalized in ("ctrl", "control"):
+            prefixes.append("^")
+        elif normalized == "alt":
+            prefixes.append("%")
+        elif normalized == "shift":
+            prefixes.append("+")
+        elif normalized in ("win", "cmd"):
+            normal_keys.append("{VK_LWIN}")
+        else:
+            normal_keys.append(to_pywinauto_key(key))
+    if not normal_keys:
+        return "".join(prefixes)
+    return "".join(f"{''.join(prefixes)}{key}" for key in normal_keys)
 
 
 if __name__ == "__main__":
