@@ -5,6 +5,17 @@ It borrows the OpenCLI shape, but swaps browser/CDP actions for desktop actions:
 window discovery, Microsoft UI Automation, keyboard input, clipboard paste, and
 future OCR/image fallbacks.
 
+The newer direction is an intent runtime, not raw click scripting:
+
+```text
+intent
+  -> app profile
+  -> preconditions
+  -> observable steps
+  -> assertions
+  -> trace
+```
+
 ```text
 desktopcli <app> <command> [options]
 desktopcli window list
@@ -67,13 +78,16 @@ desktopcli wechat status
 desktopcli wechat dump --json
 desktopcli wechat search --query "文件传输助手" --dry-run
 desktopcli wechat open-chat --to "文件传输助手" --dry-run
+desktopcli wechat draft --to "文件传输助手" --text "hello" --dry-run
 desktopcli wechat send --to "文件传输助手" --text "hello" --dry-run
+desktopcli wechat send --to "文件传输助手" --text "hello" --yes --force
 desktopcli wechat paste-file --to "文件传输助手" --file "C:\demo.txt" --dry-run
 desktopcli wechat send-file --to "文件传输助手" --file "C:\demo.txt" --dry-run
 desktopcli wechat send-image --to "文件传输助手" --file "C:\demo.png" --dry-run
 desktopcli wechat moments-open --dry-run
 desktopcli wechat moments-compose --text "晚安" --dry-run
 desktopcli wechat moments-post --text "晚安" --dry-run
+desktopcli wechat moments-post --text "晚安" --yes --force
 desktopcli wechat copy-selected --dry-run
 
 desktopcli qq status
@@ -106,17 +120,28 @@ desktopcli notepad write "hello" --dry-run
 CLI entry
   -> registry
     -> root command or app adapter
-      -> desktop bridge
-        -> Win32 window APIs
-        -> pywinauto UIA tree and control actions
-        -> clipboard, keyboard, hotkeys
-        -> file-drop clipboard
-        -> future OCR/image backends
+      -> intent runtime
+        -> app profile
+        -> preconditions / assertions
+        -> workflow executor
+        -> desktop bridge
+          -> Win32 window APIs
+          -> pywinauto UIA tree and control actions
+          -> clipboard, keyboard, hotkeys
+          -> file-drop clipboard
+          -> future OCR/image backends
 ```
 
 Adapters expose deterministic commands, rather than asking a general agent to
 freestyle a desktop session. This keeps workflows inspectable, testable, and
 recoverable.
+
+For opaque applications like WeChat PC, direct high-risk actions are blocked
+unless you pass `--force` together with `--yes`. This is intentional: the current
+Windows Qt profile can verify window identity and state transitions, but cannot
+business-verify the target chat, message bubble, or remote delivery without OCR
+or an official API. Prefer `wechat draft` and `wechat moments-compose` when you
+want a safe assisted flow.
 
 ## Workflow Files
 

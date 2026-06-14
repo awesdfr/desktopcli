@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,7 +27,7 @@ const dryRunResult = JSON.parse(dryRun);
 assert.equal(dryRunResult.ok, true);
 assert.equal(dryRunResult.data.dryRun, true);
 assert.equal(dryRunResult.warnings[0].includes("dry-run"), true);
-assert.equal(dryRunResult.data.steps.some((step) => step.action === "mouse-click" && step.x === 360 && step.y === 588), true);
+assert.equal(intentSteps(dryRunResult).some((step) => step.action === "mouse-click" && step.x === 360 && step.y === 588), true);
 
 const sendFile = execFileSync(process.execPath, [cli, "wechat", "send-file", "--to", "文件传输助手", "--file", "README.md", "--json"], {
   cwd: root,
@@ -51,7 +51,18 @@ const momentsPost = execFileSync(process.execPath, [cli, "wechat", "moments-post
 });
 const momentsPostResult = JSON.parse(momentsPost);
 assert.equal(momentsPostResult.ok, true);
-assert.equal(momentsPostResult.data.steps.some((step) => step.action === "mouse-click"), true);
-assert.equal(momentsPostResult.data.steps.some((step) => step.action === "wait-window" && step.window === "title:朋友圈,class:Qt51514QWindowIcon"), true);
+assert.equal(intentSteps(momentsPostResult).some((step) => step.action === "mouse-click"), true);
+assert.equal(intentSteps(momentsPostResult).some((step) => step.action === "assert" && step.assertion.selector === "title:朋友圈,class:Qt51514QWindowIcon"), true);
+
+const unsafeSend = spawnSync(process.execPath, [cli, "wechat", "send", "--to", "文件传输助手", "--text", "hello", "--yes", "--json"], {
+  cwd: root,
+  encoding: "utf8"
+});
+assert.notEqual(unsafeSend.status, 0);
+assert.match(unsafeSend.stderr, /--force/);
+
+function intentSteps(result) {
+  return result.data.steps ?? result.data.intent?.steps ?? [];
+}
 
 console.log("smoke tests passed");

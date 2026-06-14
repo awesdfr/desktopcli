@@ -23,7 +23,7 @@ export async function runWorkflow(ctx: CommandContext, steps: WorkflowStep[]): P
 
   const executed: unknown[] = [];
   for (const step of steps) {
-    const response = await runStep(step);
+    const response = await runWorkflowStep(step);
     executed.push({ step, response });
     if (!response.ok) {
       return {
@@ -47,7 +47,7 @@ export async function readWorkflowFile(filePath: string): Promise<WorkflowStep[]
   return parsed as WorkflowStep[];
 }
 
-async function runStep(step: WorkflowStep): Promise<CommandResult> {
+export async function runWorkflowStep(step: WorkflowStep): Promise<CommandResult> {
   if (step.action === "sleep") {
     await new Promise((resolve) => setTimeout(resolve, step.ms));
     return { ok: true, data: { slept: step.ms } };

@@ -3,24 +3,29 @@ import type { AdapterDefinition, CommandDefinition, CommandResult } from "../cor
 import { readWorkflowFile, runWorkflow, type WorkflowStep } from "../core/workflow.js";
 import { desktopBridge } from "../drivers/desktopBridge.js";
 import type { WindowSummary } from "../drivers/desktopBridge.js";
+import { runIntent } from "../runtime/intentRunner.js";
+import { selector } from "../runtime/selectors.js";
+import type { IntentPlan } from "../runtime/types.js";
+import { wechatProfile } from "./wechatProfile.js";
+import { buildWechatMomentsIntent, buildWechatSendIntent, openMomentsSteps as intentOpenMomentsSteps } from "./wechatPlans.js";
 
 const windowQueries = [
-  "title:微信,class:Qt51514QWindowIcon",
-  "title:朋友圈,class:Qt51514QWindowIcon"
+  selector(wechatProfile, "mainWindow"),
+  selector(wechatProfile, "momentsWindow")
 ];
-const defaultWindowQuery = "title:微信,class:Qt51514QWindowIcon";
-const momentsWindowQuery = "title:朋友圈,class:Qt51514QWindowIcon";
+const defaultWindowQuery = selector(wechatProfile, "mainWindow");
+const momentsWindowQuery = selector(wechatProfile, "momentsWindow");
 
 const wechatUiProfile = {
   mainWindow: defaultWindowQuery,
   momentsWindow: momentsWindowQuery,
-  filePickerWindow: "title:选择文件",
-  searchBox: { x: 122, y: 56 },
-  messageInput: { x: 360, y: 588 },
-  sidebarMoments: { x: 38, y: 256 },
-  momentsCamera: { x: 74, y: 23 },
-  momentsComposerText: { x: 156, y: 116 },
-  momentsPublish: { x: 424, y: 425 }
+  filePickerWindow: selector(wechatProfile, "filePickerWindow"),
+  searchBox: point("searchBox"),
+  messageInput: point("messageInput"),
+  sidebarMoments: point("sidebarMoments"),
+  momentsCamera: point("momentsCamera"),
+  momentsComposerText: point("momentsComposerText"),
+  momentsPublish: point("momentsPublish")
 };
 
 export function createWechatAdapter(): AdapterDefinition {
@@ -136,9 +141,24 @@ function createWechatCommands(): CommandDefinition[] {
       }
     },
     {
+      name: "draft",
+      summary: "Prepare a text draft in a WeChat chat without pressing Enter.",
+      usage: "--text <message> [--to <contact>] [--yes]",
+      strategy: "INPUT",
+      dangerous: true,
+      async run(ctx) {
+        const to = getStringFlag(ctx.args, "to");
+        const text = getStringFlag(ctx.args, "text", ctx.args.positional.join(" "));
+        if (!text) {
+          return { ok: false, message: "wechat draft requires --text or positional text" };
+        }
+        return runIntent(ctx, buildWechatSendIntent({ to, text, publish: false }), { traceName: "wechat-draft" });
+      }
+    },
+    {
       name: "send",
       summary: "Send a text message to the current chat, or search first with --to.",
-      usage: "--text <message> [--to <contact>] [--yes]",
+      usage: "--text <message> [--to <contact>] [--yes --force]",
       strategy: "INPUT",
       dangerous: true,
       async run(ctx) {
@@ -147,14 +167,10 @@ function createWechatCommands(): CommandDefinition[] {
         if (!text) {
           return { ok: false, message: "wechat send requires --text or positional text" };
         }
-        return runWorkflow(ctx, [
-          ...(to ? searchSteps(ctx, to, true) : [{ action: "activate", window: windowQuery(ctx) } satisfies WorkflowStep]),
-          { action: "sleep", ms: 400 },
-          { action: "mouse-click", window: windowQuery(ctx), ...wechatUiProfile.messageInput },
-          { action: "type", window: windowQuery(ctx), text },
-          { action: "hotkey", window: windowQuery(ctx), keys: getStringFlag(ctx.args, "send-keys", "enter") },
-          { action: "sleep", ms: 300 }
-        ]);
+        if (!ctx.dryRun && !getBooleanFlag(ctx.args, "force")) {
+          return unverifiedHighRiskRefusal("wechat send", buildWechatSendIntent({ to, text, sendKeys: getStringFlag(ctx.args, "send-keys", "enter"), publish: true }));
+        }
+        return runIntent(ctx, buildWechatSendIntent({ to, text, sendKeys: getStringFlag(ctx.args, "send-keys", "enter"), publish: true }), { traceName: "wechat-send" });
       }
     },
     {
@@ -164,10 +180,15 @@ function createWechatCommands(): CommandDefinition[] {
       strategy: "INPUT",
       dangerous: true,
       async run(ctx) {
-        return runWorkflow(ctx, [
-          { action: "activate", window: mainWindowQuery(ctx) },
-          { action: "mouse-click", window: mainWindowQuery(ctx), ...wechatUiProfile.sidebarMoments }
-        ]);
+        return runIntent(ctx, {
+          app: "wechat",
+          intent: "openMoments",
+          description: "Open the WeChat Moments window.",
+          risk: "medium",
+          profile: wechatProfile,
+          steps: intentOpenMomentsSteps(),
+          limitations: wechatProfile.notes
+        }, { traceName: "wechat-moments-open" });
       }
     },
     {
@@ -200,13 +221,13 @@ function createWechatCommands(): CommandDefinition[] {
         if (!text && files.length === 0) {
           return { ok: false, message: "wechat moments-compose requires --text or --file" };
         }
-        return runWorkflow(ctx, composeMomentsSteps(ctx, text, files, false));
+        return runIntent(ctx, buildWechatMomentsIntent({ text, files, publish: false }), { traceName: "wechat-moments-compose" });
       }
     },
     {
       name: "moments-post",
       summary: "Create and publish a Moments post with text and optional files.",
-      usage: "--text <content> [--file <image-or-video>] [--yes]",
+      usage: "--text <content> [--file <image-or-video>] [--yes --force]",
       strategy: "INPUT",
       dangerous: true,
       async run(ctx) {
@@ -215,7 +236,10 @@ function createWechatCommands(): CommandDefinition[] {
         if (!text && files.length === 0) {
           return { ok: false, message: "wechat moments-post requires --text or --file" };
         }
-        return runWorkflow(ctx, composeMomentsSteps(ctx, text, files, true));
+        if (!ctx.dryRun && !getBooleanFlag(ctx.args, "force")) {
+          return unverifiedHighRiskRefusal("wechat moments-post", buildWechatMomentsIntent({ text, files, publish: true }));
+        }
+        return runIntent(ctx, buildWechatMomentsIntent({ text, files, publish: true }), { traceName: "wechat-moments-post" });
       }
     },
     {
@@ -484,4 +508,30 @@ async function listWindows(queries: string[]): Promise<WindowSummary[]> {
     }
   }
   return [...byHandle.values()];
+}
+
+function point(name: keyof typeof wechatProfile.points): { x: number; y: number } {
+  const resolved = wechatProfile.points[name];
+  return { x: resolved.x, y: resolved.y };
+}
+
+function unverifiedHighRiskRefusal(command: string, plan: IntentPlan): CommandResult {
+  return {
+    ok: false,
+    message: `${command} is a high-risk personal WeChat action and this profile cannot business-verify the target/content. Use the draft command, or pass --yes --force if you accept that limitation.`,
+    data: {
+      suggestedSafeCommand: command.includes("moments") ? "wechat moments-compose" : "wechat draft",
+      intent: {
+        app: plan.app,
+        intent: plan.intent,
+        description: plan.description,
+        risk: plan.risk,
+        limitations: plan.limitations,
+        preconditions: plan.preconditions,
+        steps: plan.steps,
+        postconditions: plan.postconditions
+      }
+    },
+    warnings: plan.limitations
+  };
 }
